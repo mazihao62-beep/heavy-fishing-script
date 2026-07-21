@@ -63,16 +63,24 @@ local function getTools()
     return tools
 end
 
-local function getRod()
+local function getRodDebug()
     local tools = getTools()
+    local names = {}
+    for _, t in ipairs(tools) do
+        table.insert(names, t.Name)
+    end
+    print("[调试] 背包工具: " .. table.concat(names, ", "))
     for _, t in ipairs(tools) do
         local n = t.Name:lower()
-        if n:find("rod") or n:find("pole") or n:find("fishing") then
+        if n:find("rod") or n:find("pole") or n:find("fishing") or n:find("fish") then
             return t
         end
     end
     return nil
 end
+
+-- getRod 别名，方便不同地方调用
+local getRod = getRodDebug
 
 local function getBait()
     local tools = getTools()
