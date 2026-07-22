@@ -241,7 +241,13 @@ local function mW()
     CT.FlightSpeed=tFly:Slider({Flag="FlightSpeed", Title="飞行速度", Step=1, Value={Min=5,Max=100,Default=16}, Width=200, IsTextbox=true, Callback=function(v) S.FlightSpeed=v end})
 
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
-    t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v) KB.Toggle=v end})
+    t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v)
+        KB.Toggle=v
+        pcall(function()
+            local kc = Enum.KeyCode[v]
+            if kc then WN:SetToggleKey(kc) end
+        end)
+    end})
 
     local t3=WN:Tab({Title="UI设置", Icon="solar:monitor-bold"})
     CT.Particles=t3:Toggle({Flag="Particles", Title="粒子背景", Value=true, Callback=function(v) S.Particles=v; if v then sP() else xP() end end})
@@ -281,6 +287,19 @@ local function mW()
     t6:Paragraph({Title="重型钓鱼 v1.7"}); t6:Divider()
     t6:Paragraph({Title="作者", Desc="b站英吉利超入_"})
     t6:Paragraph({Title="功能", Desc="抛竿 -> 操控Bar(50%) -> 捕获 -> 卖鱼 + 飞行"})
+    -- 手动快捷键监听（兜底，WindUI内部ToggleKey可能失效）
+    spawn(function()
+        wait(1)
+        UIS.InputBegan:Connect(function(input, gpe)
+            if gpe then return end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            local kn = input.KeyCode and input.KeyCode.Name or ""
+            if kn == KB.Toggle and WN then
+                pcall(function() WN:Toggle() end)
+            end
+        end)
+    end)
+
     return sFish
 end
 
