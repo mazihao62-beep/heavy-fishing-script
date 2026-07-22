@@ -70,7 +70,7 @@ local function isFishBiting()
     return fishing and fishing.Visible == true
 end
 
--- 战斗：直接操控Bar（稳定条50% + 逃跑条50%锁定）
+-- ============ 战斗：直接操控Bar ============
 local function doBattle()
     if not S.AutoFish then return end
     if not isFishBiting() then
@@ -119,16 +119,16 @@ local function doBattle()
             return
         end
 
-        -- 稳定条锁定50%
+        -- 稳定条锁定在 50%（X=0.5正中间！）
         pcall(function()
             local bf = f:FindFirstChild("BarFrame")
             if bf then
                 local bar = bf:FindFirstChild("Bar")
-                if bar then bar.Position = UDim2.new(0, 0, 0.5, 0) end
+                if bar then bar.Position = UDim2.new(0.5, 0, 0.5, 0) end
             end
         end)
 
-        -- 逃跑条锁定50%
+        -- 逃跑条锁定在 50%
         pcall(function()
             local pf = f:FindFirstChild("ProgressionBar")
             if pf then
@@ -174,6 +174,7 @@ local function doAutoFish()
     if isFishBiting() then doBattle() else if not inBattle then cast() end; wait(S.WaitTime) end
 end
 
+-- ============ 粒子 ============
 local function sP()
     if PR then return end
     if PC then pcall(function() local p=PC.Parent; if p then p:Destroy() end end) PC=nil end
