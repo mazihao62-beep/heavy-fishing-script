@@ -1,10 +1,10 @@
 --[[
-    重型钓鱼 自动钓鱼 v1.5
+    重型钓鱼 自动钓鱼 v1.6
     WindUI 模板
-    核心：抛竿 → 鱼上钩 → 鼠标连点维持平衡 → 捕获 → 卖鱼
+    核心：抛竿 → 鱼上钩 → 直接操控Bar(50%/50%) → 捕获 → 卖鱼
 --]]
 
-print("[钓鱼] v1.5 加载中...")
+print("[钓鱼] v1.6 加载中...")
 
 local P = game:GetService("Players")
 local WS = game:GetService("Workspace")
@@ -12,8 +12,6 @@ local RS = game:GetService("ReplicatedStorage")
 local CS = game:GetService("CollectionService")
 local UIS = game:GetService("UserInputService")
 local C = game:GetService("CoreGui")
-local VIM = game:GetService("VirtualInputManager")
-local Camera = workspace.CurrentCamera
 
 local LP = P.LocalPlayer
 if not LP then return end
@@ -49,7 +47,6 @@ local S = {
     CastPower = 30,
     WaitTime = 8,
     FishRange = 50,
-    ClickSpeed = 0.03,
     Particles = true,
     Acrylic = true,
     Transparent = false,
@@ -73,17 +70,7 @@ local function isFishBiting()
     return fishing and fishing.Visible == true
 end
 
-local function clickCenter()
-    pcall(function()
-        local s = Camera.ViewportSize
-        local cx, cy = s.X / 2, s.Y / 2
-        VIM:SendMouseButtonEvent(cx, cy, 0, true, Enum.UserInputType.MouseButton1, false)
-        wait(0.01)
-        VIM:SendMouseButtonEvent(cx, cy, 0, false, Enum.UserInputType.MouseButton1, false)
-    end)
-    pcall(function() mouse1click() end)
-end
-
+-- 战斗：直接操控Bar（稳定条50% + 逃跑条50%锁定）
 local function doBattle()
     if not S.AutoFish then return end
     if not isFishBiting() then
@@ -106,14 +93,17 @@ local function doBattle()
     end
 
     if not inBattle then
-        print("[战斗] 鱼上钩！开始连点...")
+        print("[战斗] 鱼上钩！操控Bar...")
         inBattle = true
     end
 
     local startTime = os.clock()
-    while os.clock() - startTime < 60 do
-        if not isFishBiting() then
-            print("[战斗] 战斗结束（UI消失）")
+    while os.clock() - startTime < 120 do
+        local pg = LP:FindFirstChild("PlayerGui")
+        local f = pg and pg:FindFirstChild("MainGui") and pg.MainGui:FindFirstChild("Fishing")
+
+        if not f or not f.Visible then
+            print("[战斗] 战斗结束 " .. math.floor(os.clock()-startTime) .. "秒")
             inBattle = false
             wait(0.3)
             if CatchEvent then
@@ -128,8 +118,26 @@ local function doBattle()
             end
             return
         end
-        clickCenter()
-        wait(S.ClickSpeed)
+
+        -- 稳定条锁定50%
+        pcall(function()
+            local bf = f:FindFirstChild("BarFrame")
+            if bf then
+                local bar = bf:FindFirstChild("Bar")
+                if bar then bar.Position = UDim2.new(0, 0, 0.5, 0) end
+            end
+        end)
+
+        -- 逃跑条锁定50%
+        pcall(function()
+            local pf = f:FindFirstChild("ProgressionBar")
+            if pf then
+                local bar = pf:FindFirstChild("Bar")
+                if bar then bar.Size = UDim2.new(0.5, 0, 0, 0) end
+            end
+        end)
+
+        wait(0.05)
     end
     print("[战斗] 超时")
     inBattle = false
@@ -137,7 +145,7 @@ end
 
 local function equipRod()
     if not EquipRod then return false end
-    local ok, r = pcall(function() return EquipRod:InvokeServer("Fishing Rod") end)
+    local ok = pcall(function() EquipRod:InvokeServer("Fishing Rod") end)
     print("[钓鱼] 装备鱼竿: " .. tostring(ok))
     return ok
 end
@@ -214,7 +222,6 @@ local function mW()
     CT.EquipRodBtn=t1:Button({Title="装备鱼竿", Icon="solar:fishing-bold", Justify="Center", Color=Color3.fromHex("#305dff"), Callback=function() equipRod() end})
     t1:Space()
     CT.CastPower=t1:Slider({Flag="CastPower", Title="抛竿距离", Step=5, Value={Min=10,Max=100,Default=30}, Width=200, IsTextbox=true, Callback=function(v) S.CastPower=v end})
-    CT.ClickSpeed=t1:Slider({Flag="ClickSpeed", Title="点击速度(秒)", Step=0.005, Value={Min=0.01,Max=0.1,Default=0.03}, Width=200, IsTextbox=true, Callback=function(v) S.ClickSpeed=v end})
     CT.SellToggle=t1:Toggle({Flag="SellFish", Title="捕获后自动卖鱼", Value=false, Callback=function(v) S.AutoSell=v end})
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
     t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v) KB.Toggle=v end})
@@ -250,9 +257,9 @@ local function mW()
         spawn(function() wait(1) pcall(function() CM:CreateConfig("default",true) end) end)
     end)
     local t6=WN:Tab({Title="关于", Icon="solar:info-square-bold"})
-    t6:Paragraph({Title="重型钓鱼 v1.5"}); t6:Divider()
+    t6:Paragraph({Title="重型钓鱼 v1.6"}); t6:Divider()
     t6:Paragraph({Title="作者", Desc="b站英吉利超入_"})
-    t6:Paragraph({Title="功能", Desc="抛竿 -> 鼠标连点自动战斗 -> 捕鱼 -> 卖鱼"})
+    t6:Paragraph({Title="功能", Desc="抛竿 -> 操控Bar(50%)自动战斗 -> 捕获"})
     return sFish
 end
 
@@ -260,14 +267,14 @@ pcall(function() WI:SetTheme("Dark") end)
 S.ParticleColor = tc("Dark")
 local PP = false
 WI:Popup({
-    Title="重型钓鱼 v1.5", Content="抛竿+鼠标连点+自动卖鱼",
+    Title="重型钓鱼 v1.6", Content="自动抛竿 + 操控Bar战斗(50%锁定)",
     Buttons={{Title="加载", Callback=function() PP=true end, Variant="Primary"},{Title="取消", Callback=function() return end}}
 })
 while not PP do wait(0.1) end
 
 spawn(function()
     local sFish = mW()
-    print("[钓鱼] v1.5 开始运行")
+    print("[钓鱼] v1.6 开始运行")
     local last = os.clock()
     while true do
         if S.AutoFish then
