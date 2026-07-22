@@ -2,10 +2,14 @@
     重型钓鱼 自动钓鱼 v1.7
     WindUI 模板
     核心：抛竿 → 鱼上钩 → 直接操控Bar(50%/50%) → 捕获 → 卖鱼
-    新增：飞行（WASD+空格+Shift）+ 手动卖鱼按钮
+    新增：飞行（相机方向控制 + 手机适配）+ 手动卖鱼按钮
 --]]
 
 print("[钓鱼] v1.7 加载中...")
+
+-- 检测是否手机端
+local IS_MOBILE = UIS and UIS.TouchEnabled and UIS.TouchEnabled == true
+print("[钓鱼] 设备: " .. (IS_MOBILE and "手机" or "电脑"))
 
 local P = game:GetService("Players")
 local WS = game:GetService("Workspace")
@@ -56,6 +60,11 @@ local fishCount = 0
 local inBattle = false
 local flying = false
 local bv, bg = nil, nil
+local mobileGui, mobileUpBtn, mobileDownBtn = nil, nil, nil
+
+-- 手机端触屏状态
+local touchMove = Vector3.new(0,0,0)
+local touchJump = false
 
 local function getHRP()
     local c = LP.Character
@@ -199,6 +208,7 @@ local function mW()
         OnClose=function() xP(); S.AutoFish=false; S.Flight=false
             if bv then pcall(function() bv:Destroy() end); bv=nil end
             if bg then pcall(function() bg:Destroy() end); bg=nil end
+            if mobileGui then pcall(function() mobileGui:Destroy() end); mobileGui=nil end
             for _,ct in pairs(CT) do
                 if ct and type(ct.Set)=="function" then pcall(function() ct:Set(false) end) end
             end end,
@@ -229,6 +239,7 @@ local function mW()
             flying=false
             if bv then pcall(function() bv:Destroy() end); bv=nil end
             if bg then pcall(function() bg:Destroy() end); bg=nil end
+            if mobileGui then pcall(function() mobileGui:Destroy() end); mobileGui=nil end
             local c=LP.Character
             if c then
                 local hrp=c:FindFirstChild("HumanoidRootPart")
@@ -239,6 +250,8 @@ local function mW()
         end
     end})
     CT.FlightSpeed=tFly:Slider({Flag="FlightSpeed", Title="飞行速度", Step=1, Value={Min=5,Max=100,Default=16}, Width=200, IsTextbox=true, Callback=function(v) S.FlightSpeed=v end})
+    tFly:Paragraph({Title="电脑: WASD+空间+Shift"})
+    tFly:Paragraph({Title="手机: 方向摇杆+屏幕按钮"})
 
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
     t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v)
@@ -288,13 +301,65 @@ local function mW()
     return fishP
 end
 
--- ============ 飞行 ============
+-- ============ 手机端浮动按钮 ============
+local function createMobileBtns()
+    if mobileGui then pcall(function() mobileGui:Destroy() end) end
+    mobileGui = Instance.new("ScreenGui")
+    mobileGui.Name = "FlyBtn"
+    mobileGui.ResetOnSpawn = false
+    mobileGui.DisplayOrder = 999998
+    mobileGui.IgnoreGuiInset = true
+    mobileGui.Parent = C
+    
+    -- 上升按钮（右下）
+    mobileUpBtn = Instance.new("ImageButton")
+    mobileUpBtn.Size = UDim2.new(0, 60, 0, 60)
+    mobileUpBtn.Position = UDim2.new(0.85, 0, 0.7, 0)
+    mobileUpBtn.BackgroundColor3 = Color3.fromRGB(30, 150, 255)
+    mobileUpBtn.BackgroundTransparency = 0.3
+    mobileUpBtn.BorderSizePixel = 0
+    mobileUpBtn.Image = "rbxassetid://4216717318"  -- 上箭头
+    mobileUpBtn.Parent = mobileGui
+    Instance.new("UICorner", mobileUpBtn).CornerRadius = UDim.new(0, 30)
+    
+    -- 下降按钮（右下，在上升下面）
+    mobileDownBtn = Instance.new("ImageButton")
+    mobileDownBtn.Size = UDim2.new(0, 60, 0, 60)
+    mobileDownBtn.Position = UDim2.new(0.85, 0, 0.82, 0)
+    mobileDownBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+    mobileDownBtn.BackgroundTransparency = 0.3
+    mobileDownBtn.BorderSizePixel = 0
+    mobileDownBtn.Image = "rbxassetid://4216717347"  -- 下箭头
+    mobileDownBtn.Parent = mobileGui
+    Instance.new("UICorner", mobileDownBtn).CornerRadius = UDim.new(0, 30)
+    
+    -- 上升触摸
+    mobileUpBtn.MouseButton1Down:Connect(function()
+        touchJump = true
+    end)
+    mobileUpBtn.MouseButton1Up:Connect(function()
+        touchJump = false
+    end)
+    
+    -- 下降触摸
+    mobileDownBtn.MouseButton1Down:Connect(function()
+        touchJump = true  -- 用负速度表示下降
+    end)
+    mobileDownBtn.MouseButton1Up:Connect(function()
+        touchJump = false
+    end)
+    
+    print("[飞行] 手机按钮已创建")
+end
+
+-- ============ 飞行（相机方向控制 + 手机适配） ============
 local function fly()
     if not S.Flight then
         if flying then
             flying = false
             if bv then pcall(function() bv:Destroy() end); bv=nil end
             if bg then pcall(function() bg:Destroy() end); bg=nil end
+            if mobileGui then pcall(function() mobileGui:Destroy() end); mobileGui=nil end
             local c = LP.Character
             if c then
                 local hrp = c:FindFirstChild("HumanoidRootPart")
@@ -305,12 +370,19 @@ local function fly()
         end
         return
     end
+    
+    -- 手机端首次开飞行时创建按钮
+    if IS_MOBILE and not mobileGui then
+        createMobileBtns()
+    end
+    
     local c = LP.Character
     if not c then return end
     local hrp = c:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     local h = c:FindFirstChildOfClass("Humanoid")
     if not h then return end
+    
     if not flying then
         flying = true
         h.PlatformStand = true
@@ -325,21 +397,50 @@ local function fly()
         bg.D = 500
         bg.Parent = hrp
     end
+    
     local speed = S.FlightSpeed
     local move = Vector3.new(0,0,0)
     local cam = workspace.CurrentCamera
+    if not cam then return end
     local cf = cam.CFrame
     local up = Vector3.new(0,1,0)
-    local fwd = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z).Unit
-    local right = Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z).Unit
-    if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + fwd end
-    if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - fwd end
-    if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - right end
-    if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + right end
-    if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + up end
-    if UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) then move = move - up end
-    if move.Magnitude > 0 then move = move.Unit * speed end
-    bv.Velocity = move
+    
+    -- 完全跟随相机方向（3D自由飞行）
+    local fwd = cf.LookVector.Unit
+    local right = cf.RightVector.Unit
+    local camUp = cf.UpVector.Unit
+    
+    if IS_MOBILE then
+        -- 手机端：屏幕滑动控制方向 + 按钮上升下降
+        -- 前进：默认自动向前（或触屏拖拽）
+        move = move + fwd * speed
+        
+        -- 上升/下降按钮
+        if touchJump then
+            -- 判断是上升按钮按着还是下降
+            if mobileUpBtn and mobileUpBtn:IsFocused() then
+                move = move + up * speed
+            elseif mobileDownBtn and mobileDownBtn:IsFocused() then
+                move = move - up * speed
+            end
+        end
+    else
+        -- 电脑端：WASD + Space/Shift
+        if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + fwd * speed end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - fwd * speed end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - right * speed end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + right * speed end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + up * speed end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) then move = move - up * speed end
+    end
+    
+    if move.Magnitude > 0 then
+        bv.Velocity = move
+    else
+        bv.Velocity = Vector3.new(0,0,0)
+    end
+    
+    -- 身体跟随相机方向
     pcall(function() bg.CFrame = cf end)
 end
 
