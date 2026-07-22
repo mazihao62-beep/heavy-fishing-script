@@ -1,10 +1,11 @@
 --[[
-    重型钓鱼 自动钓鱼 v1.6
+    重型钓鱼 自动钓鱼 v1.7
     WindUI 模板
     核心：抛竿 → 鱼上钩 → 直接操控Bar(50%/50%) → 捕获 → 卖鱼
+    新增：飞行（WASD+空格+Shift）+ 手动卖鱼按钮
 --]]
 
-print("[钓鱼] v1.6 加载中...")
+print("[钓鱼] v1.7 加载中...")
 
 local P = game:GetService("Players")
 local WS = game:GetService("Workspace")
@@ -42,14 +43,10 @@ print("[钓鱼] Catch=" .. (CatchEvent and "OK" or "NIL"))
 print("[钓鱼] SellFish=" .. (SellFish and "OK" or "NIL"))
 
 local S = {
-    AutoFish = false,
-    AutoSell = false,
-    CastPower = 30,
-    WaitTime = 8,
-    FishRange = 50,
-    Particles = true,
-    Acrylic = true,
-    Transparent = false,
+    AutoFish = false, AutoSell = false,
+    Flight = false, FlightSpeed = 16,
+    CastPower = 30, WaitTime = 8, FishRange = 50,
+    Particles = true, Acrylic = true, Transparent = false,
     ParticleColor = Color3.fromRGB(30, 150, 255)
 }
 local KB = { Toggle = "RightShift" }
@@ -57,6 +54,8 @@ local WN, CT = nil, {}
 local PR, PS, PC = false, {}, nil
 local fishCount = 0
 local inBattle = false
+local flying = false
+local bv, bg = nil, nil
 
 local function getHRP()
     local c = LP.Character
@@ -91,17 +90,14 @@ local function doBattle()
         end
         return
     end
-
     if not inBattle then
         print("[战斗] 鱼上钩！操控Bar...")
         inBattle = true
     end
-
     local startTime = os.clock()
     while os.clock() - startTime < 120 do
         local pg = LP:FindFirstChild("PlayerGui")
         local f = pg and pg:FindFirstChild("MainGui") and pg.MainGui:FindFirstChild("Fishing")
-
         if not f or not f.Visible then
             print("[战斗] 战斗结束 " .. math.floor(os.clock()-startTime) .. "秒")
             inBattle = false
@@ -113,13 +109,10 @@ local function doBattle()
                 if S.AutoSell and SellFish then
                     wait(0.5)
                     pcall(function() SellFish:FireServer() end)
-                    print("[钓鱼] 自动卖鱼")
                 end
             end
             return
         end
-
-        -- 稳定条锁定在 50%（X=0.5正中间！）
         pcall(function()
             local bf = f:FindFirstChild("BarFrame")
             if bf then
@@ -127,8 +120,6 @@ local function doBattle()
                 if bar then bar.Position = UDim2.new(0.5, 0, 0.5, 0) end
             end
         end)
-
-        -- 逃跑条锁定在 50%
         pcall(function()
             local pf = f:FindFirstChild("ProgressionBar")
             if pf then
@@ -136,7 +127,6 @@ local function doBattle()
                 if bar then bar.Size = UDim2.new(0.5, 0, 0, 0) end
             end
         end)
-
         wait(0.05)
     end
     print("[战斗] 超时")
@@ -169,11 +159,6 @@ local function cast()
     return true
 end
 
-local function doAutoFish()
-    if not S.AutoFish then return end
-    if isFishBiting() then doBattle() else if not inBattle then cast() end; wait(S.WaitTime) end
-end
-
 -- ============ 粒子 ============
 local function sP()
     if PR then return end
@@ -204,19 +189,23 @@ local function xP() PR=false; if PC then pcall(function() local p=PC.Parent; if 
 local tc_t = {Dark=Color3.fromRGB(30,150,255),Light=Color3.fromRGB(60,180,255),Rose=Color3.fromRGB(255,130,170),Plant=Color3.fromRGB(70,210,130),Ocean=Color3.fromRGB(0,180,230),Sunset=Color3.fromRGB(255,160,70),Midnight=Color3.fromRGB(130,100,240),Forest=Color3.fromRGB(60,180,90),Lavender=Color3.fromRGB(190,140,255),Coral=Color3.fromRGB(255,140,90),Mint=Color3.fromRGB(80,230,190),Sky=Color3.fromRGB(100,190,255),Blood=Color3.fromRGB(230,90,80),Lemon=Color3.fromRGB(230,210,70),Cyber=Color3.fromRGB(0,235,210)}
 local function tc(n) return tc_t[n] or Color3.fromRGB(30,150,255) end
 
+-- ============ UI ============
 local function mW()
     WN = WI:CreateWindow({
         Title="重型钓鱼", Author="b站英吉利超入_", Icon="solar:fishing-bold",
         Size=UDim2.fromOffset(750,540), ToggleKey=Enum.KeyCode.RightShift,
         Folder="fishing-script", Acrylic=true, Resizable=false,
         ScrollBarEnabled=true, HideSearchBar=true,
-        OnClose=function() xP(); S.AutoFish=false
+        OnClose=function() xP(); S.AutoFish=false; S.Flight=false
+            if bv then pcall(function() bv:Destroy() end); bv=nil end
+            if bg then pcall(function() bg:Destroy() end); bg=nil end
             for _,ct in pairs(CT) do
                 if ct and type(ct.Set)=="function" then pcall(function() ct:Set(false) end) end
             end end,
         OnOpen=function() if S.Particles then sP() end end
     })
     spawn(function() wait(0.8) pcall(function() if WN and WN.Parent then WN.Parent.ClipsDescendants=true end end) end)
+
     local t1=WN:Tab({Title="主控面板", Icon="solar:slider-vertical-bold"})
     CT.AutoFish=t1:Toggle({Flag="AutoFish", Title="自动钓鱼+战斗", Value=false, Callback=function(v) S.AutoFish=v end})
     t1:Space()
@@ -232,16 +221,38 @@ local function mW()
             WI:Notify({Title="卖鱼", Content="已出售", Duration=2, Icon="solar:cart-bold"})
         end
     end})
+
+    local tFly=WN:Tab({Title="飞行", Icon="solar:rocket-bold"})
+    CT.FlightToggle=tFly:Toggle({Flag="Flight", Title="飞行", Value=false, Callback=function(v)
+        S.Flight=v
+        if not v then
+            flying=false
+            if bv then pcall(function() bv:Destroy() end); bv=nil end
+            if bg then pcall(function() bg:Destroy() end); bg=nil end
+            local c=LP.Character
+            if c then
+                local hrp=c:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.Velocity=Vector3.new(0,0,0) end
+                local h=c:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand=false end
+            end
+        end
+    end})
+    CT.FlightSpeed=tFly:Slider({Flag="FlightSpeed", Title="飞行速度", Step=1, Value={Min=5,Max=100,Default=16}, Width=200, IsTextbox=true, Callback=function(v) S.FlightSpeed=v end})
+
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
     t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v) KB.Toggle=v end})
+
     local t3=WN:Tab({Title="UI设置", Icon="solar:monitor-bold"})
     CT.Particles=t3:Toggle({Flag="Particles", Title="粒子背景", Value=true, Callback=function(v) S.Particles=v; if v then sP() else xP() end end})
     t3:Toggle({Flag="Acrylic", Title="毛玻璃", Value=true, Callback=function(v) S.Acrylic=v; pcall(function() WI:ToggleAcrylic(v) end) end})
     t3:Toggle({Flag="Transparent", Title="透明", Value=false, Callback=function(v) S.Transparent=v; pcall(function() WN:ToggleTransparency(v) end) end})
     local tns={"Dark","Light","Rose","Plant","Ocean","Sunset","Midnight","Forest","Lavender","Coral","Mint","Sky","Blood","Lemon","Cyber"}
     t3:Dropdown({Flag="Theme", Title="主题", Values=tns, Value="Dark", Callback=function(v) pcall(function() WI:SetTheme(v) end); S.ParticleColor=tc(v) end})
+
     local t4=WN:Tab({Title="信息统计", Icon="solar:chart-bold"})
     local sFish=t4:Paragraph({Title="钓鱼次数: 0"})
+
     local t5=WN:Tab({Title="配置管理", Icon="solar:diskette-bold"})
     pcall(function()
         local CM=WN.ConfigManager; if not CM then return end
@@ -265,31 +276,94 @@ local function mW()
                 pcall(function() ACD:Refresh(CM:AllConfigs()) end) end end})
         spawn(function() wait(1) pcall(function() CM:CreateConfig("default",true) end) end)
     end)
+
     local t6=WN:Tab({Title="关于", Icon="solar:info-square-bold"})
-    t6:Paragraph({Title="重型钓鱼 v1.6"}); t6:Divider()
+    t6:Paragraph({Title="重型钓鱼 v1.7"}); t6:Divider()
     t6:Paragraph({Title="作者", Desc="b站英吉利超入_"})
-    t6:Paragraph({Title="功能", Desc="抛竿 -> 操控Bar(50%)自动战斗 -> 捕获"})
+    t6:Paragraph({Title="功能", Desc="抛竿 -> 操控Bar(50%) -> 捕获 -> 卖鱼 + 飞行"})
     return sFish
 end
 
+-- ============ 启动 ============
 pcall(function() WI:SetTheme("Dark") end)
 S.ParticleColor = tc("Dark")
 local PP = false
 WI:Popup({
-    Title="重型钓鱼 v1.6", Content="自动抛竿 + 操控Bar战斗(50%锁定)",
+    Title="重型钓鱼 v1.7", Content="自动抛竿 + 操控Bar + 飞行",
     Buttons={{Title="加载", Callback=function() PP=true end, Variant="Primary"},{Title="取消", Callback=function() return end}}
 })
 while not PP do wait(0.1) end
 
+-- ============ 主循环 ============
 spawn(function()
     local sFish = mW()
-    print("[钓鱼] v1.6 开始运行")
+    print("[钓鱼] v1.7 开始运行")
     local last = os.clock()
     while true do
         if S.AutoFish then
             if isFishBiting() then doBattle() else if not inBattle then cast() end; wait(S.WaitTime) end
         end
+        if S.Flight and not flying then
+            flying = true
+            spawn(function()
+                while S.Flight do
+                    pcall(function()
+                        local c = LP.Character
+                        if not c then return end
+                        local hrp = c:FindFirstChild("HumanoidRootPart")
+                        if not hrp then return end
+                        local h = c:FindFirstChildOfClass("Humanoid")
+                        if h then h.PlatformStand = true end
+                        if not bv or not bv.Parent then
+                            bv = Instance.new("BodyVelocity")
+                            bv.MaxForce = Vector3.new(1,1,1) * 9e9
+                            bv.P = 12500
+                            bv.Parent = hrp
+                        end
+                        if not bg or not bg.Parent then
+                            bg = Instance.new("BodyGyro")
+                            bg.MaxTorque = Vector3.new(1,1,1) * 9e9
+                            bg.P = 12500
+                            bg.D = 500
+                            bg.Parent = hrp
+                        end
+                        local cam = workspace.CurrentCamera
+                        local mv = Vector3.new(0,0,0)
+                        if UIS:IsKeyDown(Enum.KeyCode.W) then mv = mv + cam.CFrame.LookVector end
+                        if UIS:IsKeyDown(Enum.KeyCode.S) then mv = mv - cam.CFrame.LookVector end
+                        if UIS:IsKeyDown(Enum.KeyCode.A) then mv = mv - cam.CFrame.RightVector end
+                        if UIS:IsKeyDown(Enum.KeyCode.D) then mv = mv + cam.CFrame.RightVector end
+                        if UIS:IsKeyDown(Enum.KeyCode.Space) then mv = mv + Vector3.new(0,1,0) end
+                        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then mv = mv + Vector3.new(0,-1,0) end
+                        if mv.Magnitude > 0 then mv = mv.Unit * S.FlightSpeed end
+                        bv.Velocity = mv
+                        bg.CFrame = cam.CFrame
+                    end)
+                    wait(0.03)
+                end
+                if bv then pcall(function() bv:Destroy() end); bv = nil end
+                if bg then pcall(function() bg:Destroy() end); bg = nil end
+                local c = LP.Character
+                if c then
+                    local h = c:FindFirstChildOfClass("Humanoid")
+                    if h then h.PlatformStand = false end
+                end
+                flying = false
+            end)
+        elseif not S.Flight and flying then
+            flying = false
+            if bv then pcall(function() bv:Destroy() end); bv = nil end
+            if bg then pcall(function() bg:Destroy() end); bg = nil end
+            local c = LP.Character
+            if c then
+                local h = c:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand = false end
+            end
+        end
         wait(0.3)
-        if os.clock()-last > 5 then last=os.clock(); if sFish then pcall(function() sFish:SetTitle("钓鱼次数: "..fishCount) end) end end
+        if os.clock() - last > 5 then
+            last = os.clock()
+            if sFish then pcall(function() sFish:SetTitle("钓鱼次数: " .. fishCount) end) end
+        end
     end
 end)
