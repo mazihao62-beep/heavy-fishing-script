@@ -1,26 +1,26 @@
+
 --[[
-    重型钓鱼 - 自动钓鱼 v1.1
-    修复: 鱼竿检测 + 快捷键开关
+    重型钓鱼 自动钓鱼 v1.3
+    WindUI 模板 + 自动战斗（鱼上钩维持稳定）
+    核心：EquipFishingRod → Cast → 等鱼上钩 → FishingMinigame 自动战斗 → Catch
 --]]
 
-print("[钓鱼] v1.1 加载中...")
+print("[钓鱼] v1.3 加载中...")
 
 local P = game:GetService("Players")
 local WS = game:GetService("Workspace")
 local RS = game:GetService("ReplicatedStorage")
 local CS = game:GetService("CollectionService")
-local C = game:GetService("CoreGui")
 local UIS = game:GetService("UserInputService")
+local C = game:GetService("CoreGui")
 
 local LP = P.LocalPlayer
-if not LP then print("[钓鱼] 无LocalPlayer"); return end
-print("[钓鱼] 玩家: " .. LP.Name)
+if not LP then return end
 
+-- 清除旧Gui
 for _, g in ipairs(C:GetChildren()) do
-    if g:IsA("ScreenGui") then
-        if g.Name == "A" or g.Name:find("Fishing") or g.Name == "WindUI" then
-            pcall(function() g:Destroy() end)
-        end
+    if g:IsA("ScreenGui") and (g.Name == "A" or g.Name:find("Fishing") or g.Name == "WindUI") then
+        pcall(function() g:Destroy() end)
     end
 end
 
@@ -28,277 +28,205 @@ local WI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus
 if not WI then print("[钓鱼] WindUI 失败"); return end
 print("[钓鱼] WindUI OK")
 
-local EV = RS:FindFirstChild("Events")
-local Fishing = EV and EV:FindFirstChild("Fishing")
-local PositionCast = EV and EV:FindFirstChild("Position_Cast")
-local Catch = EV and EV:FindFirstChild("Catch")
-local AutoFish = EV and EV:FindFirstChild("AutoFishing")
-local SellFish = EV and EV:FindFirstChild("SellFish")
-local EquipRod = EV and EV:FindFirstChild("EquipFishingRod")
-local EquipBait = EV and EV:FindFirstChild("EquipBait")
-local FishingMinigame = EV and EV:FindFirstChild("FishingMinigame")
+-- 获取远程事件
+local Events = RS:FindFirstChild("Events")
+if not Events then print("[钓鱼] Events 不存在！"); return end
 
-print("[钓鱼] Fishing=" .. tostring(Fishing and "OK" or "NIL"))
-print("[钓鱼] Catch=" .. tostring(Catch and "OK" or "NIL"))
-print("[钓鱼] SellFish=" .. tostring(SellFish and "OK" or "NIL"))
-print("[钓鱼] EquipRod=" .. tostring(EquipRod and "OK" or "NIL"))
-print("[钓鱼] EquipBait=" .. tostring(EquipBait and "OK" or "NIL"))
+local EquipRod = Events:FindFirstChild("EquipFishingRod")
+local EquipBait = Events:FindFirstChild("EquipBait")
+local PositionCast = Events:FindFirstChild("Position_Cast")
+local Fishing = Events:FindFirstChild("Fishing")
+local CatchEvent = Events:FindFirstChild("Catch")
+local SellFish = Events:FindFirstChild("SellFish")
+local FishingMinigame = Events:FindFirstChild("FishingMinigame")
+local TriggerSkill = Events:FindFirstChild("TriggerMinigameSkill")
+local UpdateProg = Events:FindFirstChild("UpdateFishProgression")
 
-local function getTools()
-    local tools = {}
-    local bp = LP:FindFirstChild("Backpack")
-    if bp then
-        for _, t in ipairs(bp:GetChildren()) do
-            if t:IsA("Tool") then table.insert(tools, t) end
-        end
-    end
-    local c = LP.Character
-    if c then
-        for _, t in ipairs(c:GetChildren()) do
-            if t:IsA("Tool") then table.insert(tools, t) end
-        end
-    end
-    return tools
-end
+print("[钓鱼] EquipRod=" .. (EquipRod and "OK" or "NIL"))
+print("[钓鱼] Fishing=" .. (Fishing and "OK" or "NIL"))
+print("[钓鱼] Catch=" .. (CatchEvent and "OK" or "NIL"))
+print("[钓鱼] Minigame=" .. (FishingMinigame and "OK" or "NIL"))
+print("[钓鱼] SellFish=" .. (SellFish and "OK" or "NIL"))
 
-local function printAllTools()
-    local tools = getTools()
-    if #tools == 0 then
-        print("[工具] 背包和角色无Tool类对象")
-    else
-        for _, t in ipairs(tools) do
-            print("[工具] " .. t.Name .. " (" .. t.ClassName .. ") Parent=" .. t.Parent.Name)
-        end
-    end
-    local rods = {}
-    for _, obj in ipairs(WS:GetDescendants()) do
-        if obj:IsA("Tool") and obj.Name:lower():find("rod") then
-            table.insert(rods, obj.Name)
-        end
-    end
-    if #rods > 0 then
-        print("[工具] 全图竿: " .. table.concat(rods, ", "))
-    else
-        print("[工具] 全图无Tool竿")
-    end
-end
-
-local function getRod()
-    local tools = getTools()
-    for _, t in ipairs(tools) do
-        local n = t.Name:lower()
-        if n:find("rod") or n:find("pole") or n:find("fishing") then
-            return t
-        end
-    end
-    for _, obj in ipairs(WS:GetDescendants()) do
-        if obj:IsA("Tool") and obj.Name:lower():find("rod") then
-            return obj
-        end
-    end
-    return nil
-end
-
-local function equipRodByName(name)
-    if not EquipRod then return false end
-    local ok, err = pcall(function() EquipRod:InvokeServer(name) end)
-    if ok then
-        print("[竿] InvokeServer(" .. name .. ") OK")
-    else
-        print("[竿] InvokeServer(" .. name .. ") ERR: " .. tostring(err))
-    end
-    return ok
-end
-
-local function equip(t)
-    if not t then return false end
-    local c = LP.Character
-    if not c then return false end
-    local h = c:FindFirstChildOfClass("Humanoid")
-    if not h then return false end
-    if t.Parent ~= c then
-        h:EquipTool(t)
-        wait(0.2)
-    end
-    return true
-end
+-- 设置
+local S = {
+    AutoFish = false,
+    AutoBattle = true,
+    AutoSell = false,
+    CastPower = 30,
+    WaitTime = 10,
+    FishRange = 50,
+    BattleSpeed = 0.05,
+    Particles = true,
+    Acrylic = true,
+    Transparent = false,
+    ParticleColor = Color3.fromRGB(30, 150, 255)
+}
+local KB = { Toggle = "RightShift" }
+local WN, CT = nil, {}
+local PR, PS, PC = false, {}, nil
+local fishCount = 0
+local inBattle = false
 
 local function getHRP()
     local c = LP.Character
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
-local function findWaterSpot()
-    local h = getHRP()
-    if not h then return nil end
-    local pos = h.Position
-    local dir = h.CFrame.LookVector
-    local water = WS:FindFirstChild("Ocean") or WS:FindFirstChild("water") or WS:FindFirstChild("Water")
-    if water then
-        local best = nil; local bestDot = 0
-        for _, part in ipairs(water:GetDescendants()) do
-            if part:IsA("BasePart") then
-                local d = (part.Position - pos).Magnitude
-                local dot = (part.Position - pos).Unit:Dot(dir)
-                if d >= 10 and d <= 50 and dot > bestDot then
-                    best = part.Position; bestDot = dot
-                end
-            end
+-- 获取钓鱼UI
+local function getFishingUI()
+    local pg = LP:FindFirstChild("PlayerGui")
+    local mainGui = pg and pg:FindFirstChild("MainGui")
+    return mainGui and mainGui:FindFirstChild("Fishing")
+end
+
+-- 检测鱼是否上钩（Fishing UI 可见）
+local function isFishBiting()
+    local fishingUI = getFishingUI()
+    return fishingUI and fishingUI.Visible == true
+end
+
+-- 自动战斗（保持稳定）
+local function doBattle()
+    if not S.AutoBattle or not FishingMinigame then return end
+    local fishingUI = getFishingUI()
+    if not fishingUI or not fishingUI.Visible then
+        if inBattle then
+            print("[战斗] 战斗结束")
+            inBattle = false
         end
-        if best then return best + Vector3.new(0, 1, 0) end
+        return
     end
-    for _, obj in ipairs(WS:GetDescendants()) do
-        if obj.Name:lower() == "water" and obj:IsA("BasePart") then
-            local d = (obj.Position - pos).Magnitude
-            local dot = (obj.Position - pos).Unit:Dot(dir)
-            if d >= 5 and d <= 50 and dot > 0 then
-                return obj.Position + Vector3.new(0, 1, 0)
-            end
+
+    if not inBattle then
+        print("[战斗] 鱼上钩！开始战斗...")
+        inBattle = true
+    end
+
+    -- 战斗循环：快速交替发 minigame 事件保持稳定
+    local startTime = os.clock()
+
+    -- 战斗持续直到 Fishing UI 消失
+    local tickCount = 0
+    while fishingUI and fishingUI.Visible and S.AutoBattle do
+        tickCount = tickCount + 1
+
+        -- 交替发事件
+        if tickCount % 2 == 0 then
+            pcall(function() FishingMinigame:FireServer(1) end)
+        else
+            pcall(function() FishingMinigame:FireServer(2) end)
         end
-    end
-    return pos + dir * 30 + Vector3.new(0, 1, 0)
-end
 
-local S = {
-    AutoFish = false, AutoSell = false, AutoBait = true,
-    ShowFish = false,
-    Particles = true, Acrylic = true, Transparent = false,
-    ParticleColor = Color3.fromRGB(0, 150, 255)
-}
-local KB = { Toggle = "RightShift" }
-local WN, CT = nil, {}
-local PR, PS, PC = false, {}, nil
-local fishCaught = 0
+        -- 每5轮触发一次技能
+        if tickCount % 10 == 0 and TriggerSkill then
+            pcall(function() TriggerSkill:FireServer(1) end)
+        end
 
-local function doCast()
-    if not Fishing then return end
-    local rod = getRod()
-    if not rod then
-        print("[钓] 搜不到竿Tool，试试EquipFishingRod...")
-        pcall(function() equipRodByName("Fishing Rod") end)
-        wait(0.5)
-        rod = getRod()
-        if not rod then print("[钓] 无竿"); return end
-    end
-    equip(rod)
-    local spot = findWaterSpot()
-    if not spot then print("[钓] 找不到水面"); return end
-    local h = getHRP()
-    if h then h.CFrame = CFrame.lookAt(h.Position, spot); wait(0.2) end
-    pcall(function() Fishing:FireServer("Cast", {Position = spot}); print("[钓] 抛竿") end)
-end
+        -- 更新 Progression
+        if tickCount % 3 == 0 and UpdateProg then
+            pcall(function() UpdateProg:FireServer(1) end)
+        end
 
-local function doReel()
-    if not Fishing then return end
-    pcall(function() Fishing:FireServer("Reel"); print("[钓] 收线") end)
-end
+        wait(S.BattleSpeed)
 
-local function autoFishLoop()
-    if not S.AutoFish or not Fishing then return end
-    local rod = getRod()
-    if not rod then
-        pcall(function() equipRodByName("Fishing Rod") end)
-        wait(0.5)
-        rod = getRod()
-    end
-    if not rod then print("[钓] 无竿"); return end
-    equip(rod)
-    if S.AutoBait and EquipBait then
-        pcall(function()
-            local ok, err = pcall(function() EquipBait:InvokeServer() end)
-            if not ok then
-                local baits = {}
-                for _, obj in ipairs(WS:GetDescendants()) do
-                    if obj.Name:lower():find("bait") and obj:IsA("Tool") then
-                        table.insert(baits, obj.Name)
-                    end
-                end
-                if #baits > 0 then equip(getRod()) end
-            end
-        end)
-        wait(0.2)
-    end
-    local spot = findWaterSpot()
-    if spot then
-        local h = getHRP()
-        if h then h.CFrame = CFrame.lookAt(h.Position, spot); wait(0.3) end
-        pcall(function() Fishing:FireServer("Cast", {Position = spot}) end)
-        print("[钓] 抛竿")
-    end
-    wait(5 + math.random(3))
-    pcall(function() Fishing:FireServer("Reel") end)
-    print("[钓] 收线")
-    wait(0.5)
-    if Catch then
-        pcall(function() Catch:FireServer() end)
-        fishCaught = fishCaught + 1
-        print("[钓] 捕鱼! 总计:" .. fishCaught)
-    end
-end
-
-local function doSellFish()
-    if not S.AutoSell or not SellFish then return end
-    local npcFolder = WS:FindFirstChild("NPC")
-    if not npcFolder then return end
-    for _, npc in ipairs(npcFolder:GetChildren()) do
-        local n = npc.Name:lower()
-        if n:find("sell") or n:find("merchant") or n:find("shop") or n:find("fish") then
-            local npcPart = npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart", true)
-            if npcPart then
-                local h = getHRP()
-                if h then
-                    local d = (npcPart.Position - h.Position).Magnitude
-                    if d > 15 then
-                        h.CFrame = CFrame.new(npcPart.Position.X, npcPart.Position.Y + 2, npcPart.Position.Z - 4)
-                        wait(0.5)
-                    end
-                    pcall(function() SellFish:FireServer() end)
-                    print("[钓] 卖鱼")
-                end
-            end
+        -- 超时保护（60秒强制结束）
+        if os.clock() - startTime > 60 then
+            print("[战斗] 超时，强制结束战斗")
             break
         end
-    end
-end
 
-local fishESP = {}
-local function updateFishESP()
-    if not S.ShowFish then
-        for _, v in pairs(fishESP) do pcall(function() v:Destroy() end) end
-        fishESP = {}; return
+        -- 刷新引用
+        fishingUI = getFishingUI()
     end
-    local fishes = WS:FindFirstChild("Fishes")
-    if not fishes then return end
-    local current = {}; local h = getHRP(); local pos = h and h.Position
-    if not pos then return end
-    for _, fish in ipairs(fishes:GetChildren()) do
-        if fish:IsA("Model") then
-            local bp = fish.PrimaryPart or fish:FindFirstChildWhichIsA("BasePart", true)
-            if bp and (bp.Position - pos).Magnitude <= 100 then
-                current[fish] = true
-                if not fishESP[fish] then
-                    local bb = Instance.new("BillboardGui")
-                    bb.Size = UDim2.new(0, 60, 0, 30); bb.MaxDistance = 100
-                    bb.AlwaysOnTop = true; bb.StudsOffset = Vector3.new(0, 3, 0)
-                    pcall(function() bb.Parent = fish end)
-                    local tl = Instance.new("TextLabel", bb)
-                    tl.Size = UDim2.new(1,0,1,0); tl.Text = "Fish"
-                    tl.TextScaled = true; tl.BackgroundTransparency = 1
-                    tl.TextColor3 = Color3.fromRGB(0, 200, 255)
-                    fishESP[fish] = bb
-                end
+
+    if inBattle then
+        print("[战斗] 鱼已捕获/逃脱")
+        inBattle = false
+        wait(0.3)
+
+        -- 尝试捕鱼
+        if CatchEvent then
+            pcall(function() CatchEvent:FireServer() end)
+            fishCount = fishCount + 1
+            print("[钓鱼] 捕鱼成功！总数: " .. fishCount)
+
+            -- 自动卖鱼
+            if S.AutoSell and SellFish then
+                wait(0.5)
+                pcall(function() SellFish:FireServer() end)
+                print("[钓鱼] 自动卖鱼")
             end
         end
     end
-    for m, v in pairs(fishESP) do if not current[m] then pcall(function() v:Destroy() end); fishESP[m] = nil end end
 end
 
+-- 装备鱼竿
+local function equipRod()
+    if not EquipRod then return false end
+    local ok, r = pcall(function() return EquipRod:InvokeServer("Fishing Rod") end)
+    print("[钓鱼] 装备鱼竿: " .. tostring(ok))
+    return ok
+end
+
+-- 抛竿
+local function cast()
+    equipRod()
+    wait(0.3)
+    local hrp = getHRP()
+    if not hrp then return false end
+    local pos = hrp.Position
+    local dir = hrp.CFrame.LookVector
+    local target = pos + dir * S.CastPower
+
+    if PositionCast then
+        pcall(function() PositionCast:FireServer(target) end)
+        wait(0.1)
+    end
+    if Fishing then
+        pcall(function() Fishing:FireServer("Cast", {Position = target}) end)
+    end
+    print("[钓鱼] 抛竿 @" .. math.floor(target.X) .. "," .. math.floor(target.Z))
+    return true
+end
+
+-- 手动收线
+local function catchFish()
+    if CatchEvent then
+        pcall(function() CatchEvent:FireServer() end)
+        print("[钓鱼] 手动收线")
+    end
+end
+
+-- 卖鱼
+local function sellFish()
+    if SellFish then
+        pcall(function() SellFish:FireServer() end)
+        print("[钓鱼] 卖鱼")
+    end
+end
+
+-- 自动钓鱼循环
+local function doAutoFish()
+    if not S.AutoFish then return end
+
+    -- 如果正在战斗中，先处理战斗
+    if isFishBiting() then
+        doBattle()
+        return
+    end
+
+    -- 否则抛竿
+    cast()
+end
+
+-- ============ 粒子 ============
 local function sP()
     if PR then return end
     if PC then pcall(function() local p=PC.Parent; if p then p:Destroy() end end) PC=nil end
     PS={}; wait(0.3)
     local sg=Instance.new("ScreenGui"); sg.Name="FP"; sg.ResetOnSpawn=false; sg.DisplayOrder=999999; sg.IgnoreGuiInset=true; sg.Parent=C
-    PC=Instance.new("Frame"); PC.Size=UDim2.new(1,0,1,0); PC.BackgroundTransparency=1; PC.BorderSizePixel=0; PC.Parent=sg
+    PC=Instance.new("Frame"); PC.Size=UDim2.new(1,0,1,0); PC.BackgroundTransparency=1; PC.BorderSizePixel=0; PC.Active=false; PC.Parent=sg
     for i=1,50 do
         local d=Instance.new("Frame"); local sz=math.random(5,10)
         d.Size=UDim2.new(0,sz,0,sz); d.Position=UDim2.new(0.2+math.random()*0.6,0,0.2+math.random()*0.6,0)
@@ -319,14 +247,16 @@ local function sP()
 end
 local function xP() PR=false; if PC then pcall(function() local p=PC.Parent; if p then p:Destroy() end end) PC=nil end; PS={} end
 
-local tc_t = {Blue=Color3.fromRGB(0,150,255),Dark=Color3.fromRGB(80,170,255),Light=Color3.fromRGB(60,130,210),Rose=Color3.fromRGB(255,130,170),Ocean=Color3.fromRGB(0,180,230),Sunset=Color3.fromRGB(255,160,70),Midnight=Color3.fromRGB(130,100,240),Forest=Color3.fromRGB(60,180,90),Lavender=Color3.fromRGB(190,140,255),Coral=Color3.fromRGB(255,140,90),Mint=Color3.fromRGB(80,230,190),Sky=Color3.fromRGB(100,190,255),Blood=Color3.fromRGB(230,90,80),Lemon=Color3.fromRGB(230,210,70),Cyber=Color3.fromRGB(0,235,210)}
-local function tc(n) return tc_t[n] or Color3.fromRGB(0,150,255) end
+-- ============ 主题 ============
+local tc_t = {Dark=Color3.fromRGB(30,150,255),Light=Color3.fromRGB(60,180,255),Rose=Color3.fromRGB(255,130,170),Plant=Color3.fromRGB(70,210,130),Ocean=Color3.fromRGB(0,180,230),Sunset=Color3.fromRGB(255,160,70),Midnight=Color3.fromRGB(130,100,240),Forest=Color3.fromRGB(60,180,90),Lavender=Color3.fromRGB(190,140,255),Coral=Color3.fromRGB(255,140,90),Mint=Color3.fromRGB(80,230,190),Sky=Color3.fromRGB(100,190,255),Blood=Color3.fromRGB(230,90,80),Lemon=Color3.fromRGB(230,210,70),Cyber=Color3.fromRGB(0,235,210)}
+local function tc(n) return tc_t[n] or Color3.fromRGB(30,150,255) end
 
+-- ============ UI ============
 local function mW()
     WN = WI:CreateWindow({
-        Title="重型钓鱼", Author="b站英吉利超入_", Icon="solar:fish-bold",
+        Title="重型钓鱼", Author="b站英吉利超入_", Icon="solar:fishing-bold",
         Size=UDim2.fromOffset(750,540), ToggleKey=Enum.KeyCode.RightShift,
-        Folder="heavy-fishing", Acrylic=true, Resizable=false,
+        Folder="fishing-script", Acrylic=true, Resizable=false,
         ScrollBarEnabled=true, HideSearchBar=true,
         OnClose=function()
             xP(); S.AutoFish=false
@@ -341,36 +271,58 @@ local function mW()
     local t1=WN:Tab({Title="主控面板", Icon="solar:slider-vertical-bold"})
     CT.AutoFish=t1:Toggle({Flag="AutoFish", Title="自动钓鱼", Value=false, Callback=function(v) S.AutoFish=v end})
     t1:Space()
-    CT.AutoSell=t1:Toggle({Flag="AutoSell", Title="自动卖鱼", Value=false, Callback=function(v) S.AutoSell=v end})
-    CT.AutoBait=t1:Toggle({Flag="AutoBait", Title="自动装饵", Value=true, Callback=function(v) S.AutoBait=v end})
-    t1:Divider()
-    CT.ShowFish=t1:Toggle({Flag="ShowFish", Title="鱼群ESP", Value=false, Callback=function(v) S.ShowFish=v; if not v then updateFishESP() end end})
-    t1:Divider()
-    t1:Button({Title="手动抛竿", Icon="solar:round-arrow-up-bold", Justify="Center", Color=Color3.fromHex("#305dff"), Callback=function() pcall(doCast) end})
+    CT.AutoBattle=t1:Toggle({Flag="AutoBattle", Title="自动战斗(保持稳定)", Value=true, Callback=function(v) S.AutoBattle=v end})
     t1:Space()
-    t1:Button({Title="手动收线", Icon="solar:round-arrow-down-bold", Justify="Center", Color=Color3.fromHex("#ff6030"), Callback=function() pcall(doReel) end})
+    CT.EquipRodBtn=t1:Button({Title="装备鱼竿", Icon="solar:fishing-bold", Justify="Center", Color=Color3.fromHex("#305dff"), Callback=function() equipRod() end})
     t1:Space()
-    t1:Button({Title="调试: 打印所有工具", Icon="solar:bug-bold", Justify="Center", Color=Color3.fromHex("#ff9900"), Callback=function() printAllTools() end})
+
+    -- 鱼饵选择
+    local baits = {"无"}
+    if EquipBait then
+        local ok, list = pcall(function() return EquipBait:InvokeServer("List") end)
+        if ok and type(list) == "table" then
+            baits = {}
+            for _, b in ipairs(list) do table.insert(baits, tostring(b)) end
+        end
+    end
+    if #baits <= 1 then
+        local bp = LP:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                local n = t.Name:lower()
+                if n:find("bait") or n:find("worm") or n:find("lure") then
+                    table.insert(baits, t.Name)
+                end
+            end
+        end
+    end
+    CT.BaitDropdown=t1:Dropdown({Title="选择鱼饵", Values=baits, Value=baits[1] or "无", Callback=function(v)
+        if v and EquipBait and v ~= "无" then
+            pcall(function() EquipBait:InvokeServer(v) end)
+        end
+    end})
+    t1:Space()
+
+    t1:Button({Title="手动抛竿", Icon="solar:cast-bold", Justify="Center", Color=Color3.fromHex("#10C550"), Callback=function() cast() end})
+    t1:Button({Title="手动收线", Icon="solar:wind-bold", Justify="Center", Color=Color3.fromHex("#ff9040"), Callback=function() catchFish() end})
+    t1:Button({Title="卖鱼", Icon="solar:wallet-bold", Justify="Center", Color=Color3.fromHex("#ff3040"), Callback=function() sellFish() end})
+    t1:Divider()
+    CT.CastPower=t1:Slider({Flag="CastPower", Title="抛竿距离", Step=5, Value={Min=10,Max=100,Default=30}, Width=200, IsTextbox=true, Callback=function(v) S.CastPower=v end})
+    CT.BattleSpeed=t1:Slider({Flag="BattleSpeed", Title="战斗速度(秒)", Step=0.01, Value={Min=0.01,Max=0.2,Default=0.05}, Width=200, IsTextbox=true, Callback=function(v) S.BattleSpeed=v end})
+    CT.SellToggle=t1:Toggle({Flag="SellFish", Title="捕获后自动卖鱼", Value=false, Callback=function(v) S.AutoSell=v end})
 
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
-    t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift",
-        Callback=function(v)
-            KB.Toggle = v
-            if WN then pcall(function() WN:SetToggleKey(v) end) end
-            print("[键] 切换键设为: " .. tostring(v))
-        end
-    })
+    t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v) KB.Toggle=v end})
 
     local t3=WN:Tab({Title="UI设置", Icon="solar:monitor-bold"})
     CT.Particles=t3:Toggle({Flag="Particles", Title="粒子背景", Value=true, Callback=function(v) S.Particles=v; if v then sP() else xP() end end})
     t3:Toggle({Flag="Acrylic", Title="毛玻璃", Value=true, Callback=function(v) S.Acrylic=v; pcall(function() WI:ToggleAcrylic(v) end) end})
     t3:Toggle({Flag="Transparent", Title="透明", Value=false, Callback=function(v) S.Transparent=v; pcall(function() WN:ToggleTransparency(v) end) end})
-    local tns={"Blue","Dark","Light","Rose","Ocean","Sunset","Midnight","Forest","Lavender","Coral","Mint","Sky","Blood","Lemon","Cyber"}
-    t3:Dropdown({Flag="Theme", Title="主题", Values=tns, Value="Blue", Callback=function(v) pcall(function() WI:SetTheme(v) end); S.ParticleColor=tc(v) end})
+    local tns={"Dark","Light","Rose","Plant","Ocean","Sunset","Midnight","Forest","Lavender","Coral","Mint","Sky","Blood","Lemon","Cyber"}
+    t3:Dropdown({Flag="Theme", Title="主题", Values=tns, Value="Dark", Callback=function(v) pcall(function() WI:SetTheme(v) end); S.ParticleColor=tc(v) end})
 
     local t4=WN:Tab({Title="信息统计", Icon="solar:chart-bold"})
-    local sFish=t4:Paragraph({Title="上钩: 0"})
-    local sRod=t4:Paragraph({Title="鱼竿: 无"})
+    local sFish=t4:Paragraph({Title="钓鱼次数: 0"})
 
     local t5=WN:Tab({Title="配置管理", Icon="solar:diskette-bold"})
     pcall(function()
@@ -397,19 +349,20 @@ local function mW()
     end)
 
     local t6=WN:Tab({Title="关于", Icon="solar:info-square-bold"})
-    t6:Paragraph({Title="重型钓鱼 v1.1"}); t6:Divider()
+    t6:Paragraph({Title="重型钓鱼 v1.3"}); t6:Divider()
     t6:Paragraph({Title="作者", Desc="b站英吉利超入_"})
-    t6:Paragraph({Title="说明", Desc="自动抛竿+收线+卖鱼+鱼群ESP"})
-    return sFish, sRod
+    t6:Paragraph({Title="功能", Desc="抛竿 → 自动战斗(稳定平衡) → 捕鱼 → 卖鱼"})
+    return sFish
 end
 
-pcall(function() WI:SetTheme("Ocean") end)
-S.ParticleColor = tc("Ocean")
+-- ============ 主循环 ============
+pcall(function() WI:SetTheme("Dark") end)
+S.ParticleColor = tc("Dark")
 
 local PP = false
 WI:Popup({
-    Title="重型钓鱼 v1.1",
-    Content="自动抛竿/收线/卖鱼 鱼群ESP",
+    Title="重型钓鱼 v1.3",
+    Content="抛竿 → 自动战斗(平衡条) → 捕鱼 → 卖鱼",
     Buttons={
         {Title="加载", Callback=function() PP=true end, Variant="Primary"},
         {Title="取消", Callback=function() return end}
@@ -417,26 +370,32 @@ WI:Popup({
 })
 while not PP do wait(0.1) end
 
-print("[调试] 加载时工具列表:")
-printAllTools()
-
 spawn(function()
-    local sFish, sRod = mW()
-    print("[钓鱼] v1.1 开始运行")
-    local last = 0
+    local sFish = mW()
+    print("[钓鱼] v1.3 开始运行")
+    local last = os.clock()
+
     while true do
-        if S.AutoFish then pcall(autoFishLoop); wait(2) end
-        if S.AutoSell then pcall(doSellFish); wait(1) end
-        pcall(updateFishESP)
-        local now = tick()
-        if now - last > 3 then
-            last = now
-            if sFish then pcall(function() sFish:SetTitle("上钩: " .. fishCaught) end) end
-            if sRod then
-                local rod = getRod()
-                pcall(function() sRod:SetTitle("鱼竿: " .. (rod and rod.Name or "无")) end)
+        if S.AutoFish then
+            -- 检查是否有鱼上钩
+            if isFishBiting() then
+                doBattle()
+            else
+                -- 每15秒自动抛竿一次（如果不在战斗中）
+                local hrp = getHRP()
+                if hrp then
+                    cast()
+                end
+                wait(S.WaitTime)
             end
         end
+
         wait(0.5)
+
+        local now = os.clock()
+        if now - last > 5 then
+            last = now
+            if sFish then pcall(function() sFish:SetTitle("钓鱼次数: " .. fishCount) end) end
+        end
     end
 end)
