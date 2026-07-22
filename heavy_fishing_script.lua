@@ -23,7 +23,7 @@ for _, g in ipairs(C:GetChildren()) do
     end
 end
 
-local WI = loadstring(game:HttpGet("https://raw.githubusercontent.com/FootageSus/WindUI/main/dist/main.lua"))()
+local WI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 if not WI then print("[钓鱼] WindUI 失败"); return end
 print("[钓鱼] WindUI OK")
 
@@ -243,10 +243,7 @@ local function mW()
     local t2=WN:Tab({Title="快捷键", Icon="solar:settings-bold"})
     t2:Keybind({Flag="ToggleKey", Title="窗口开关", Value="RightShift", Callback=function(v)
         KB.Toggle=v
-        pcall(function()
-            local kc = Enum.KeyCode[v]
-            if kc then WN:SetToggleKey(kc) end
-        end)
+        pcall(function() WN:SetToggleKey(Enum.KeyCode[v]) end)
     end})
 
     local t3=WN:Tab({Title="UI设置", Icon="solar:monitor-bold"})
@@ -257,13 +254,14 @@ local function mW()
     t3:Dropdown({Flag="Theme", Title="主题", Values=tns, Value="Dark", Callback=function(v) pcall(function() WI:SetTheme(v) end); S.ParticleColor=tc(v) end})
 
     local t4=WN:Tab({Title="信息统计", Icon="solar:chart-bold"})
-    local sFish=t4:Paragraph({Title="钓鱼次数: 0"})
+    local fishP=t4:Paragraph({Title="钓鱼次数: 0"})
 
     local t5=WN:Tab({Title="配置管理", Icon="solar:diskette-bold"})
     pcall(function()
         local CM=WN.ConfigManager; if not CM then return end
         local cni=t5:Input({Flag="CN", Title="配置名称", Value="default", Icon="solar:file-text-bold", Callback=function(v) end})
-        t5:Space(); local AC={}; pcall(function() AC=CM:AllConfigs() end)
+        t5:Space()
+        local AC={}; pcall(function() AC=CM:AllConfigs() end)
         local DV=nil; for _,v in ipairs(AC) do if v=="default" then DV="default"; break end end
         local ACD=t5:Dropdown({Title="已有配置", Values=AC, Value=DV, Callback=function(v) if v then pcall(function() cni:Set(v) end) end end})
         t5:Space()
@@ -286,103 +284,116 @@ local function mW()
     local t6=WN:Tab({Title="关于", Icon="solar:info-square-bold"})
     t6:Paragraph({Title="重型钓鱼 v1.7"}); t6:Divider()
     t6:Paragraph({Title="作者", Desc="b站英吉利超入_"})
-    t6:Paragraph({Title="功能", Desc="抛竿 -> 操控Bar(50%) -> 捕获 -> 卖鱼 + 飞行"})
-    -- 手动快捷键监听（兜底，WindUI内部ToggleKey可能失效）
+    t6:Paragraph({Title="说明", Desc="自动抛竿+战斗Bar操控+卖鱼+飞行"})
+    return fishP
+end
+
+-- ============ 飞行 ============
+local function fly()
+    if not S.Flight then
+        if flying then
+            flying = false
+            if bv then pcall(function() bv:Destroy() end); bv=nil end
+            if bg then pcall(function() bg:Destroy() end); bg=nil end
+            local c = LP.Character
+            if c then
+                local hrp = c:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.Velocity = Vector3.new(0,0,0) end
+                local h = c:FindFirstChildOfClass("Humanoid")
+                if h then h.PlatformStand = false end
+            end
+        end
+        return
+    end
+    local c = LP.Character
+    if not c then return end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not h then return end
+    if not flying then
+        flying = true
+        h.PlatformStand = true
+        bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0,0,0)
+        bv.MaxForce = Vector3.new(1,1,1) * 100000
+        bv.P = 1250
+        bv.Parent = hrp
+        bg = Instance.new("BodyGyro")
+        bg.MaxTorque = Vector3.new(1,1,1) * 100000
+        bg.P = 1250
+        bg.D = 500
+        bg.Parent = hrp
+    end
+    local speed = S.FlightSpeed
+    local move = Vector3.new(0,0,0)
+    local cam = workspace.CurrentCamera
+    local cf = cam.CFrame
+    local up = Vector3.new(0,1,0)
+    local fwd = Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z).Unit
+    local right = Vector3.new(cf.RightVector.X, 0, cf.RightVector.Z).Unit
+    if UIS:IsKeyDown(Enum.KeyCode.W) then move = move + fwd end
+    if UIS:IsKeyDown(Enum.KeyCode.S) then move = move - fwd end
+    if UIS:IsKeyDown(Enum.KeyCode.A) then move = move - right end
+    if UIS:IsKeyDown(Enum.KeyCode.D) then move = move + right end
+    if UIS:IsKeyDown(Enum.KeyCode.Space) then move = move + up end
+    if UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) then move = move - up end
+    if move.Magnitude > 0 then move = move.Unit * speed end
+    bv.Velocity = move
+    pcall(function() bg.CFrame = cf end)
+end
+
+-- ============ 启动 ============
+pcall(function() WI:SetTheme("Dark") end)
+S.ParticleColor = tc("Dark")
+
+local PP = false
+WI:Popup({
+    Title="重型钓鱼 v1.7",
+    Content="自动抛竿+战斗Bar操控+卖鱼+飞行",
+    Buttons={
+        {Title="加载", Callback=function() PP=true end, Variant="Primary"},
+        {Title="取消", Callback=function() return end}
+    }
+})
+while not PP do wait(0.1) end
+
+spawn(function()
+    local fishP = mW()
+    print("[钓鱼] v1.7 开始运行")
+    local lastCast = 0
+
+    -- 手动监听快捷键（兜底）
     spawn(function()
         wait(1)
         UIS.InputBegan:Connect(function(input, gpe)
             if gpe then return end
             if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
             local kn = input.KeyCode and input.KeyCode.Name or ""
-            if kn == KB.Toggle and WN then
+            if kn == "RightShift" and WN then
                 pcall(function() WN:Toggle() end)
             end
         end)
     end)
 
-    return sFish
-end
-
--- ============ 启动 ============
-pcall(function() WI:SetTheme("Dark") end)
-S.ParticleColor = tc("Dark")
-local PP = false
-WI:Popup({
-    Title="重型钓鱼 v1.7", Content="自动抛竿 + 操控Bar + 飞行",
-    Buttons={{Title="加载", Callback=function() PP=true end, Variant="Primary"},{Title="取消", Callback=function() return end}}
-})
-while not PP do wait(0.1) end
-
--- ============ 主循环 ============
-spawn(function()
-    local sFish = mW()
-    print("[钓鱼] v1.7 开始运行")
-    local last = os.clock()
     while true do
-        if S.AutoFish then
-            if isFishBiting() then doBattle() else if not inBattle then cast() end; wait(S.WaitTime) end
-        end
-        if S.Flight and not flying then
-            flying = true
-            spawn(function()
-                while S.Flight do
-                    pcall(function()
-                        local c = LP.Character
-                        if not c then return end
-                        local hrp = c:FindFirstChild("HumanoidRootPart")
-                        if not hrp then return end
-                        local h = c:FindFirstChildOfClass("Humanoid")
-                        if h then h.PlatformStand = true end
-                        if not bv or not bv.Parent then
-                            bv = Instance.new("BodyVelocity")
-                            bv.MaxForce = Vector3.new(1,1,1) * 9e9
-                            bv.P = 12500
-                            bv.Parent = hrp
-                        end
-                        if not bg or not bg.Parent then
-                            bg = Instance.new("BodyGyro")
-                            bg.MaxTorque = Vector3.new(1,1,1) * 9e9
-                            bg.P = 12500
-                            bg.D = 500
-                            bg.Parent = hrp
-                        end
-                        local cam = workspace.CurrentCamera
-                        local mv = Vector3.new(0,0,0)
-                        if UIS:IsKeyDown(Enum.KeyCode.W) then mv = mv + cam.CFrame.LookVector end
-                        if UIS:IsKeyDown(Enum.KeyCode.S) then mv = mv - cam.CFrame.LookVector end
-                        if UIS:IsKeyDown(Enum.KeyCode.A) then mv = mv - cam.CFrame.RightVector end
-                        if UIS:IsKeyDown(Enum.KeyCode.D) then mv = mv + cam.CFrame.RightVector end
-                        if UIS:IsKeyDown(Enum.KeyCode.Space) then mv = mv + Vector3.new(0,1,0) end
-                        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then mv = mv + Vector3.new(0,-1,0) end
-                        if mv.Magnitude > 0 then mv = mv.Unit * S.FlightSpeed end
-                        bv.Velocity = mv
-                        bg.CFrame = cam.CFrame
-                    end)
-                    wait(0.03)
-                end
-                if bv then pcall(function() bv:Destroy() end); bv = nil end
-                if bg then pcall(function() bg:Destroy() end); bg = nil end
-                local c = LP.Character
-                if c then
-                    local h = c:FindFirstChildOfClass("Humanoid")
-                    if h then h.PlatformStand = false end
-                end
-                flying = false
-            end)
-        elseif not S.Flight and flying then
-            flying = false
-            if bv then pcall(function() bv:Destroy() end); bv = nil end
-            if bg then pcall(function() bg:Destroy() end); bg = nil end
-            local c = LP.Character
-            if c then
-                local h = c:FindFirstChildOfClass("Humanoid")
-                if h then h.PlatformStand = false end
+        local now = os.clock()
+        -- 战斗
+        pcall(doBattle)
+        wait(0.05)
+        -- 飞行
+        pcall(fly)
+        -- 抛竿
+        if S.AutoFish and not inBattle then
+            if now - lastCast > 8 then
+                pcall(cast)
+                lastCast = now
             end
         end
-        wait(0.3)
-        if os.clock() - last > 5 then
-            last = os.clock()
-            if sFish then pcall(function() sFish:SetTitle("钓鱼次数: " .. fishCount) end) end
+        -- 统计
+        if fishP then
+            pcall(function() fishP:SetTitle("钓鱼次数: " .. fishCount) end)
         end
+        wait(0.1)
     end
 end)
